@@ -8,4 +8,12 @@ struct Units {
         let count = Double(bytes) / pow(1024, Double(i))
         return String(format: "%.1f %@", count, units[i])
     }
+    
+    static func bytesTotal(_ bytes: UInt64) -> String {
+        if bytes == 0 { return "0 B" }
+        let units = ["B", "KB", "MB", "GB", "TB"]
+        let i = min(Int(floor(log2(Double(bytes)) / log2(1024))), units.count - 1)
+        let count = Double(bytes) / pow(1024, Double(i))
+        return String(format: "%.1f %@", count, units[i])
+    }
 }

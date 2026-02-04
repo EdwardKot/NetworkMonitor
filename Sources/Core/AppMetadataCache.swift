@@ -3,11 +3,9 @@ import AppKit
 class AppMetadataCache {
     static let shared = AppMetadataCache()
     
-    // Key: PID
-    private var cache: [Int32: (name: String, icon: NSImage?)] = [:]
+    private var cache: [Int32: (name: String, icon: NSImage?, lastAccess: Date)] = [:]
     private let lock = NSLock()
     
-    // Fallback icon
     private let defaultIcon: NSImage? = {
         let image = NSImage(systemSymbolName: "gear", accessibilityDescription: "Process")
         return image
@@ -18,23 +16,27 @@ class AppMetadataCache {
         defer { lock.unlock() }
         
         if let cached = cache[pid] {
-            return cached
+            cache[pid] = (name: cached.name, icon: cached.icon, lastAccess: Date())
+            return (name: cached.name, icon: cached.icon)
         }
         
-        // Fetch fresh metadata
         var name = defaultName
         var icon = defaultIcon
         
         if let app = NSRunningApplication(processIdentifier: pid) {
             name = app.localizedName ?? defaultName
             icon = app.icon
-        } else {
-            // Try to find via workspace if it's not a running app (unlikely for active network but possible for background daemons)
-            // For now, sticking to NSRunningApplication is safest for speed
         }
         
-        cache[pid] = (name: name, icon: icon)
+        cache[pid] = (name: name, icon: icon, lastAccess: Date())
         return (name: name, icon: icon)
+    }
+    
+    func pruneStaleEntries() {
+        let cutoff = Date().addingTimeInterval(-3600)
+        lock.lock()
+        cache = cache.filter { $0.value.lastAccess > cutoff }
+        lock.unlock()
     }
     
     func clear() {

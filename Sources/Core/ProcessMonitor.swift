@@ -2,44 +2,125 @@ import Foundation
 import AppKit
 
 struct ProcessNetworkStats: Identifiable {
-    let id: Int32 // PID
+    let id: Int32
     let name: String
     var download: UInt64
     var upload: UInt64
     var icon: NSImage?
-    var lastActiveTime: Date  // NEW: Track when process was last active
+    var lastActiveTime: Date
+}
+
+struct ProcessTrafficRecord: Identifiable {
+    let id: String
+    let name: String
+    var totalDownload: UInt64
+    var totalUpload: UInt64
+    var icon: NSImage?
+    var firstSeen: Date
+    var lastSeen: Date
+}
+
+class TrafficHistoryStore {
+    static let shared = TrafficHistoryStore()
+    
+    private var records: [String: ProcessTrafficRecord] = [:]
+    private let lock = NSLock()
+    private let retentionPeriod: TimeInterval = 24 * 60 * 60
+    
+    func record(name: String, pid: Int32, download: UInt64, upload: UInt64, icon: NSImage?) {
+        guard download > 0 || upload > 0 else { return }
+        
+        let key = name
+        let now = Date()
+        
+        lock.lock()
+        defer { lock.unlock() }
+        
+        if var existing = records[key] {
+            existing.totalDownload += download
+            existing.totalUpload += upload
+            existing.lastSeen = now
+            if icon != nil { existing.icon = icon }
+            records[key] = existing
+        } else {
+            records[key] = ProcessTrafficRecord(
+                id: key,
+                name: name,
+                totalDownload: download,
+                totalUpload: upload,
+                icon: icon,
+                firstSeen: now,
+                lastSeen: now
+            )
+        }
+    }
+    
+    func getRecords(sortBy: TrafficSortType) -> [ProcessTrafficRecord] {
+        lock.lock()
+        let snapshot = records.values.map { $0 }
+        lock.unlock()
+        
+        switch sortBy {
+        case .download:
+            return snapshot.sorted { $0.totalDownload > $1.totalDownload }
+        case .upload:
+            return snapshot.sorted { $0.totalUpload > $1.totalUpload }
+        case .total:
+            return snapshot.sorted { ($0.totalDownload + $0.totalUpload) > ($1.totalDownload + $1.totalUpload) }
+        }
+    }
+    
+    func cleanup() {
+        let cutoff = Date().addingTimeInterval(-retentionPeriod)
+        lock.lock()
+        records = records.filter { $0.value.lastSeen > cutoff }
+        lock.unlock()
+    }
+    
+    func totalDownload() -> UInt64 {
+        lock.lock()
+        defer { lock.unlock() }
+        return records.values.reduce(0) { $0 + $1.totalDownload }
+    }
+    
+    func totalUpload() -> UInt64 {
+        lock.lock()
+        defer { lock.unlock() }
+        return records.values.reduce(0) { $0 + $1.totalUpload }
+    }
+}
+
+enum TrafficSortType {
+    case download, upload, total
 }
 
 class ProcessMonitor {
     private var lastStats: [String: (rx: UInt64, tx: UInt64)] = [:]
     
-    // Serial queue for running nettop in the background
     private let monitorQueue = DispatchQueue(label: "com.antigravity.nettop", qos: .utility)
     
-    // Cache for latest results to serve UI immediately
-    private var currentProcesses: [String: ProcessNetworkStats] = [:]  // Key by name.pid
+    private var currentProcesses: [String: ProcessNetworkStats] = [:]
     private let lock = NSLock()
     
-    // Cooldown: Keep processes visible for this duration after activity stops
-    private let cooldownDuration: TimeInterval = 8.0  // seconds
+    private let cooldownDuration: TimeInterval = 8.0
+    
+    private var isUpdating = false
+    private var lastCleanup = Date()
+    private let cleanupInterval: TimeInterval = 60.0
     
     func fetchProcesses() -> [ProcessNetworkStats] {
-        // Trigger background update
-        updateStatsAsync()
+        triggerUpdateIfNeeded()
         
         lock.lock()
         defer { lock.unlock() }
         
-        // Filter out stale processes and sort by activity
         let now = Date()
         let activeProcesses = currentProcesses.values.filter { process in
-            // Keep if: has activity OR within cooldown period
             let isActive = process.download > 0 || process.upload > 0
             let withinCooldown = now.timeIntervalSince(process.lastActiveTime) < cooldownDuration
             return isActive || withinCooldown
         }
         
-        // Sort: Active processes first (by download), then idle ones
         return activeProcesses.sorted { lhs, rhs in
             let lhsActive = lhs.download > 0 || lhs.upload > 0
             let rhsActive = rhs.download > 0 || rhs.upload > 0
@@ -47,37 +128,65 @@ class ProcessMonitor {
             if lhsActive && !rhsActive { return true }
             if !lhsActive && rhsActive { return false }
             
-            // Both active or both idle - sort by download speed
-            if lhs.download != rhs.download {
-                return lhs.download > rhs.download
-            }
-            return lhs.upload > rhs.upload
+            let lhsTotal = lhs.download + lhs.upload
+            let rhsTotal = rhs.download + rhs.upload
+            return lhsTotal > rhsTotal
         }
     }
     
-    private func updateStatsAsync() {
+    private func triggerUpdateIfNeeded() {
+        lock.lock()
+        let shouldUpdate = !isUpdating
+        if shouldUpdate { isUpdating = true }
+        lock.unlock()
+        
+        guard shouldUpdate else { return }
+        
         monitorQueue.async { [weak self] in
-            guard let self = self else { return }
-            
-            let task = Process()
-            task.launchPath = "/usr/bin/nettop"
-            task.arguments = ["-L", "1", "-P", "-t", "external", "-J", "bytes_in,bytes_out"]
-            
-            let pipe = Pipe()
-            task.standardOutput = pipe
-            
-            do {
-                try task.run()
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                task.waitUntilExit()
-                
-                if let output = String(data: data, encoding: .utf8) {
-                    self.processOutput(output)
-                }
-            } catch {
-                print("Error running nettop: \(error)")
-            }
+            self?.runNettop()
         }
+    }
+    
+    private func runNettop() {
+        let task = Process()
+        task.launchPath = "/usr/bin/nettop"
+        task.arguments = ["-L", "1", "-P", "-t", "external", "-J", "bytes_in,bytes_out"]
+        
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = FileHandle.nullDevice
+        
+        do {
+            try task.run()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            task.waitUntilExit()
+            
+            if let output = String(data: data, encoding: .utf8) {
+                self.processOutput(output)
+            }
+        } catch {
+            // Silently fail
+        }
+        
+        lock.lock()
+        isUpdating = false
+        lock.unlock()
+        
+        periodicCleanupIfNeeded()
+    }
+    
+    private func periodicCleanupIfNeeded() {
+        let now = Date()
+        guard now.timeIntervalSince(lastCleanup) > cleanupInterval else { return }
+        lastCleanup = now
+        
+        lock.lock()
+        let activeKeys = Set(currentProcesses.keys)
+        lastStats = lastStats.filter { activeKeys.contains($0.key) }
+        lock.unlock()
+        
+        TrafficHistoryStore.shared.cleanup()
+        AppMetadataCache.shared.pruneStaleEntries()
     }
     
     private func processOutput(_ output: String) {
@@ -140,7 +249,6 @@ class ProcessMonitor {
         
         lock.lock()
         if dlSpeed > 0 || ulSpeed > 0 {
-            // Process is active - update or create with current timestamp
             currentProcesses[key] = ProcessNetworkStats(
                 id: pid,
                 name: metadata.name,
@@ -149,8 +257,14 @@ class ProcessMonitor {
                 icon: metadata.icon,
                 lastActiveTime: now
             )
+            TrafficHistoryStore.shared.record(
+                name: metadata.name,
+                pid: pid,
+                download: dlSpeed,
+                upload: ulSpeed,
+                icon: metadata.icon
+            )
         } else if var existing = currentProcesses[key] {
-            // Process exists but is now idle - update speeds but keep old timestamp
             existing.download = 0
             existing.upload = 0
             currentProcesses[key] = existing

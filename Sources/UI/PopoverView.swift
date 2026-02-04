@@ -86,6 +86,8 @@ struct PopoverView: View {
     var onSettings: () -> Void
     @AppStorage("processDisplayCount") private var processDisplayCount: Int = 10
     @AppStorage("showProcessIcon") private var showProcessIcon: Bool = true
+    @State private var showingTrafficDetail: TrafficDetailType? = nil
+    @State private var selectedAnchor: CGPoint = .zero
     
     private let rowHeight: CGFloat = 44
     
@@ -95,15 +97,12 @@ struct PopoverView: View {
     
     var body: some View {
         VStack(spacing: 16) {
-            // Header Section
             VStack(spacing: 16) {
                 HStack {
                     Text("Network Activity")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Image(systemName: "chart.bar.xaxis")
-                        .foregroundStyle(.secondary)
                 }
                 
                 HStack(spacing: 12) {
@@ -112,7 +111,11 @@ struct PopoverView: View {
                         value: state.totalDownload,
                         tint: .green,
                         icon: "arrow.down.circle.fill",
-                        history: state.downloadHistory
+                        history: state.downloadHistory,
+                        showingDetail: Binding(
+                            get: { showingTrafficDetail == .download },
+                            set: { if $0 { showingTrafficDetail = .download } else { showingTrafficDetail = nil } }
+                        )
                     )
                     
                     SpeedMetric(
@@ -120,7 +123,11 @@ struct PopoverView: View {
                         value: state.totalUpload,
                         tint: .blue,
                         icon: "arrow.up.circle.fill",
-                        history: state.uploadHistory
+                        history: state.uploadHistory,
+                        showingDetail: Binding(
+                            get: { showingTrafficDetail == .upload },
+                            set: { if $0 { showingTrafficDetail = .upload } else { showingTrafficDetail = nil } }
+                        )
                     )
                 }
             }
@@ -133,7 +140,6 @@ struct PopoverView: View {
             .padding(.horizontal, 16)
             .padding(.top, 16)
             
-            // Process List Section
             VStack(alignment: .leading, spacing: 8) {
                 Text("Top Processes")
                     .font(.system(size: 11, weight: .semibold))
@@ -154,7 +160,6 @@ struct PopoverView: View {
             Divider()
                 .padding(.horizontal, 16)
             
-            // Footer
             HStack {
                 Button(action: onSettings) {
                     Image(systemName: "gearshape.fill")
@@ -186,12 +191,130 @@ struct PopoverView: View {
     }
 }
 
+enum TrafficDetailType: Equatable {
+    case download, upload
+}
+
+struct TrafficDetailView: View {
+    let type: TrafficDetailType
+    @Environment(\.dismiss) private var dismiss
+    @State private var records: [ProcessTrafficRecord] = []
+    
+    private var title: String {
+        type == .download ? "Download Traffic (24h)" : "Upload Traffic (24h)"
+    }
+    
+    private var tint: Color {
+        type == .download ? .green : .blue
+    }
+    
+    private var totalTraffic: UInt64 {
+        type == .download
+            ? TrafficHistoryStore.shared.totalDownload()
+            : TrafficHistoryStore.shared.totalUpload()
+    }
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.system(size: 15, weight: .semibold))
+                    Text("Total: \(Units.bytesTotal(totalTraffic))")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(16)
+            
+            Divider()
+            
+            if records.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: "chart.bar.xaxis")
+                        .font(.system(size: 32))
+                        .foregroundStyle(.tertiary)
+                    Text("No traffic recorded yet")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 2) {
+                        ForEach(records) { record in
+                            TrafficRecordRow(record: record, type: type, tint: tint)
+                        }
+                    }
+                    .padding(12)
+                }
+            }
+        }
+        .frame(width: 340, height: 400)
+        .background(.regularMaterial)
+        .onAppear {
+            let sortType: TrafficSortType = type == .download ? .download : .upload
+            records = TrafficHistoryStore.shared.getRecords(sortBy: sortType)
+        }
+    }
+}
+
+struct TrafficRecordRow: View {
+    let record: ProcessTrafficRecord
+    let type: TrafficDetailType
+    let tint: Color
+    @State private var isHovering = false
+    
+    private var trafficValue: UInt64 {
+        type == .download ? record.totalDownload : record.totalUpload
+    }
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            Group {
+                if let icon = record.icon {
+                    Image(nsImage: icon)
+                        .resizable()
+                        .antialiased(true)
+                } else {
+                    Image(systemName: "app.fill")
+                        .foregroundStyle(.tertiary)
+                        .font(.system(size: 16))
+                }
+            }
+            .frame(width: 24, height: 24)
+            
+            Text(record.name)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+            
+            Spacer()
+            
+            Text(Units.bytesTotal(trafficValue))
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundStyle(tint)
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .background {
+            if isHovering {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(.quinary)
+            }
+        }
+        .onHover { isHovering = $0 }
+    }
+}
+
 struct SpeedMetric: View {
     let label: String
     let value: UInt64
     let tint: Color
     let icon: String
     let history: [CGFloat]
+    @Binding var showingDetail: Bool
     
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -227,6 +350,16 @@ struct SpeedMetric: View {
         .background {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(.black.opacity(0.1))
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            showingDetail = true
+        }
+        .popover(isPresented: $showingDetail) {
+            TrafficDetailView(type: label == "Download" ? .download : .upload)
+        }
+        .onHover { isHovering in
+            if isHovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
         }
     }
 }
