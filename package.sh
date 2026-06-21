@@ -62,6 +62,8 @@ cat > "${APP_DIR}/Contents/Info.plist" << 'EOF'
     <string>Copyright © 2024. All rights reserved.</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
+    <key>LSUIElement</key>
+    <true/>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.utilities</string>
 </dict>

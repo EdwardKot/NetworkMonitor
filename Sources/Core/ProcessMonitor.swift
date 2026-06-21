@@ -147,31 +147,55 @@ class ProcessMonitor {
         }
     }
     
+    private let nettopTimeout: TimeInterval = 5.0
+
     private func runNettop() {
         let task = Process()
         task.launchPath = "/usr/bin/nettop"
         task.arguments = ["-L", "1", "-P", "-t", "external", "-J", "bytes_in,bytes_out"]
-        
+
         let pipe = Pipe()
         task.standardOutput = pipe
         task.standardError = FileHandle.nullDevice
-        
+
         do {
+            // Cap total output to avoid memory spikes from runaway nettop
+            let maxOutputSize = 512 * 1024 // 512 KB
             try task.run()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            task.waitUntilExit()
-            
-            if let output = String(data: data, encoding: .utf8) {
+
+            let deadline = Date().addingTimeInterval(nettopTimeout)
+            let outputData = NSMutableData()
+
+            while task.isRunning {
+                let available = pipe.fileHandleForReading.availableData
+                if !available.isEmpty {
+                    outputData.append(available)
+                    // Truncate if nettop produces too much data
+                    if outputData.length > maxOutputSize { break }
+                }
+                if Date() > deadline {
+                    task.terminate()
+                    break
+                }
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+
+            // Drain any remaining data after process exits
+            if task.isRunning {
+                task.waitUntilExit()
+            }
+
+            if outputData.length > 0, let output = String(data: outputData as Data, encoding: .utf8) {
                 self.processOutput(output)
             }
         } catch {
             // Silently fail
         }
-        
+
         lock.lock()
         isUpdating = false
         lock.unlock()
-        
+
         periodicCleanupIfNeeded()
     }
     

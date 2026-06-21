@@ -38,15 +38,20 @@ class NetworkReader {
         var ptr = ifaddr
         while ptr != nil {
             let interface = ptr!.pointee
+            let flags = interface.ifa_flags & 0xFFFF
             let name = String(cString: interface.ifa_name)
-            
-            // Skip Loopback
-            if (interface.ifa_flags & UInt32(IFF_LOOPBACK)) == 0 {
-                let addr = interface.ifa_addr.pointee
-                if addr.sa_family == UInt8(AF_LINK) {
-                    let data = interface.ifa_data.assumingMemoryBound(to: if_data.self)
-                    stats[name] = (ibytes: UInt64(data.pointee.ifi_ibytes), obytes: UInt64(data.pointee.ifi_obytes))
-                }
+
+            // Skip loopback, inactive, and tunnel interfaces
+            guard (flags & UInt32(IFF_LOOPBACK)) == 0,
+                  (flags & UInt32(IFF_UP)) != 0,
+                  (flags & UInt32(IFF_RUNNING)) != 0,
+                  (flags & UInt32(IFF_POINTOPOINT)) == 0
+            else { ptr = interface.ifa_next; continue }
+
+            let addr = interface.ifa_addr.pointee
+            if addr.sa_family == UInt8(AF_LINK) {
+                let data = interface.ifa_data.assumingMemoryBound(to: if_data.self)
+                stats[name] = (ibytes: UInt64(data.pointee.ifi_ibytes), obytes: UInt64(data.pointee.ifi_obytes))
             }
             ptr = interface.ifa_next
         }

@@ -5,6 +5,34 @@ enum LaunchAtLoginManager {
         let base = Bundle.main.bundleIdentifier?.replacingOccurrences(of: " ", with: "") ?? "com.antigravity.NetworkMonitor"
         return "\(base).launchAtLogin"
     }
+
+    /// Path prefix shared by any plist related to this app (matches old labels too).
+    private static var plistNamePrefix: String {
+        return "launchAtLogin"
+    }
+
+    /// Remove any LaunchAgent plist with a different label that points to the same executable.
+    /// This cleans up orphaned registrations from development iterations of bundle identifiers.
+    static func cleanOrphanedRegistrations() {
+        guard let execPath = Bundle.main.executableURL?.path else { return }
+        let agentsDir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents")
+
+        guard let files = try? FileManager.default.contentsOfDirectory(at: agentsDir, includingPropertiesForKeys: nil) else { return }
+
+        let currentLabel = label
+        for url in files where url.pathExtension == "plist" && url.lastPathComponent != "\(currentLabel).plist" {
+            guard let plist = NSDictionary(contentsOf: url) as? [String: Any],
+                  let args = plist["ProgramArguments"] as? [String],
+                  args.first == execPath
+            else { continue }
+
+            // This is an orphan — bootout and delete
+            let orphanLabel = plist["Label"] as? String ?? ""
+            _ = try? bootout(label: orphanLabel)
+            _ = try? FileManager.default.removeItem(at: url)
+        }
+    }
     
     private static var plistURL: URL {
         let dir = FileManager.default.homeDirectoryForCurrentUser
@@ -68,6 +96,12 @@ enum LaunchAtLoginManager {
     private static func bootout() throws -> Int32 {
         let domain = "gui/\(getuid())"
         return try runLaunchctl(arguments: ["bootout", domain, plistURL.path])
+    }
+
+    @discardableResult
+    private static func bootout(label: String) throws -> Int32 {
+        let domain = "gui/\(getuid())"
+        return try runLaunchctl(arguments: ["bootout", "\(domain)/\(label)"])
     }
     
     @discardableResult

@@ -10,6 +10,7 @@ enum DisplayStyle: String, CaseIterable, Identifiable {
 
 class SettingsManager: ObservableObject {
     @AppStorage("updateInterval") var updateInterval: Double = 1.0
+    @AppStorage("processUpdateInterval") var processUpdateInterval: Double = 3.0
     @AppStorage("displayStyle") var displayStyle: DisplayStyle = .both
     @AppStorage("showProcessIcon") var showProcessIcon: Bool = true
     @AppStorage("processDisplayCount") var processDisplayCount: Int = 10
@@ -19,6 +20,7 @@ class SettingsManager: ObservableObject {
 struct SettingsView: View {
     @ObservedObject var settings: SettingsManager
     var onUpdateIntervalChanged: (Double) -> Void
+    var onProcessIntervalChanged: (Double) -> Void
     @State private var launchAtLoginError: String?
     @State private var isApplyingLaunchAtLoginChange: Bool = false
     
@@ -30,6 +32,13 @@ struct SettingsView: View {
                 }
                 .onChange(of: settings.updateInterval) { _, newValue in
                     onUpdateIntervalChanged(newValue)
+                }
+                
+                Slider(value: $settings.processUpdateInterval, in: 1.0...10.0, step: 1.0) {
+                    Text("Process Interval: \(settings.processUpdateInterval, specifier: "%.0f")s")
+                }
+                .onChange(of: settings.processUpdateInterval) { _, newValue in
+                    onProcessIntervalChanged(newValue)
                 }
                 
                 Picker("Display Style", selection: $settings.displayStyle) {
