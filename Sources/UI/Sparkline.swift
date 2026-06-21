@@ -9,7 +9,6 @@ struct Sparkline: View {
             let points = self.points(for: data, in: geo.size)
             
             ZStack {
-                // Gradient Fill
                 if let first = points.first, let last = points.last {
                     Path { path in
                         path.move(to: first)
@@ -22,14 +21,13 @@ struct Sparkline: View {
                     }
                     .fill(
                         LinearGradient(
-                            gradient: Gradient(colors: [color.opacity(0.4), color.opacity(0.05)]),
+                            colors: [color.opacity(0.14), color.opacity(0.015)],
                             startPoint: .top,
                             endPoint: .bottom
                         )
                     )
                 }
                 
-                // Line Stroke
                 if let first = points.first {
                     Path { path in
                         path.move(to: first)
@@ -37,8 +35,7 @@ struct Sparkline: View {
                             path.addLine(to: point)
                         }
                     }
-                    .stroke(color, style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
-                    .shadow(color: color.opacity(0.2), radius: 2, x: 0, y: 1)
+                    .stroke(color, style: StrokeStyle(lineWidth: 1.25, lineCap: .round, lineJoin: .round))
                 }
             }
         }
@@ -47,17 +44,16 @@ struct Sparkline: View {
     private func points(for data: [CGFloat], in size: CGSize) -> [CGPoint] {
         guard data.count > 1 else { return [] }
         
-        let maxVal = data.max() ?? 1
-        // Avoid division by zero
-        let safeMax = maxVal == 0 ? 1 : maxVal
-        
-        // Use a slightly wider step if data points are few, or fit to width
+        let peak = max(data.max() ?? 0, 1)
+        let scale = peak * 1.12
+        let verticalInset: CGFloat = 1
+        let plotHeight = max(0, size.height - verticalInset * 2)
         let step = size.width / CGFloat(data.count - 1)
         
         return data.enumerated().map { index, value in
             CGPoint(
                 x: CGFloat(index) * step,
-                y: size.height - (value / safeMax * size.height)
+                y: verticalInset + plotHeight - (value / scale * plotHeight)
             )
         }
     }

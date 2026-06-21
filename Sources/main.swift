@@ -27,8 +27,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         LaunchAtLoginManager.cleanOrphanedRegistrations()
         
         let contentView = PopoverView(state: state, onSettings: { [weak self] in self?.openSettings() })
-        popover.contentViewController = NSHostingController(rootView: contentView)
-        popover.contentSize = NSSize(width: 300, height: 480)  // Must match PopoverView.frame
+        let hostingController = NSHostingController(rootView: contentView)
+        hostingController.sizingOptions = [.preferredContentSize]
+        popover.contentViewController = hostingController
+        popover.contentSize = NSSize(width: PopoverLayout.width, height: 320)
         popover.behavior = .transient
         popover.delegate = self
         
@@ -101,10 +103,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var lastStatusUlStr: String = ""
 
     private func updateTotals(stats: NetworkStats, dlStr: String, ulStr: String) {
-        // Skip main-thread dispatch and rendering if status bar text unchanged
-        guard dlStr != lastStatusDlStr || ulStr != lastStatusUlStr else { return }
-        lastStatusDlStr = dlStr
-        lastStatusUlStr = ulStr
+        let statusTextChanged = dlStr != lastStatusDlStr || ulStr != lastStatusUlStr
+        if statusTextChanged {
+            lastStatusDlStr = dlStr
+            lastStatusUlStr = ulStr
+        }
 
         let applyUpdates = { [weak self] in
             guard let self = self else { return }
@@ -118,10 +121,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 self.state.uploadHistory.removeFirst()
             }
 
-            self.statusBar?.updateTitle(
-                download: dlStr,
-                upload: ulStr
-            )
+            if statusTextChanged {
+                self.statusBar?.updateTitle(
+                    download: Units.statusRate(stats.download),
+                    upload: Units.statusRate(stats.upload)
+                )
+            }
         }
 
         if Thread.isMainThread {

@@ -4,3 +4,4 @@
 /*.xcodeproj
 .swiftpm/
 NetworkMonitor.app/
+/dist/

@@ -4,11 +4,10 @@ import SwiftUI
 class StatusBarItem: NSObject {
     private var statusItem: NSStatusItem
     private var popover: NSPopover
-    private var lastWidth: CGFloat = 0
-    private let font: NSFont = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .semibold)
+    private let font: NSFont = NSFont.monospacedDigitSystemFont(ofSize: 9.5, weight: .bold)
     private let horizontalPadding: CGFloat = 4
-    private let verticalPadding: CGFloat = 1
-    private let minWidth: CGFloat = 55
+    private let lineOverlap: CGFloat = 2
+    private let itemWidth: CGFloat = 66
     
     init(popover: NSPopover) {
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -20,6 +19,7 @@ class StatusBarItem: NSObject {
     
     private func setupView() {
         guard let button = statusItem.button else { return }
+        statusItem.length = itemWidth
         button.action = #selector(togglePopover(_:))
         button.target = self
         button.imagePosition = .imageOnly
@@ -28,19 +28,13 @@ class StatusBarItem: NSObject {
     
     func updateTitle(download: String, upload: String) {
         assert(Thread.isMainThread, "status bar updates must be on the main thread")
-        let dlText = "↙ " + download
-        let ulText = "↗ " + upload
+        let dlText = "↓ " + download
+        let ulText = "↑ " + upload
 
-        let render = renderStatusImage(download: dlText, upload: ulText)
-        statusItem.button?.image = render.image
-
-        if render.width != lastWidth {
-            lastWidth = render.width
-            statusItem.length = render.width
-        }
+        statusItem.button?.image = renderStatusImage(download: dlText, upload: ulText)
     }
     
-    private func renderStatusImage(download: String, upload: String) -> (image: NSImage, width: CGFloat) {
+    private func renderStatusImage(download: String, upload: String) -> NSImage {
         let dlAttributes: [NSAttributedString.Key: Any] = [
             .font: font,
             .foregroundColor: NSColor.labelColor
@@ -52,8 +46,7 @@ class StatusBarItem: NSObject {
         
         let dlSize = (download as NSString).size(withAttributes: dlAttributes)
         let ulSize = (upload as NSString).size(withAttributes: ulAttributes)
-        let textWidth = max(dlSize.width, ulSize.width)
-        let width = max(minWidth, ceil(textWidth + horizontalPadding * 2))
+        let width = itemWidth
         let height: CGFloat = 22
         
         let image = NSImage(size: NSSize(width: width, height: height))
@@ -62,15 +55,16 @@ class StatusBarItem: NSObject {
         NSBezierPath(rect: NSRect(x: 0, y: 0, width: width, height: height)).fill()
         
         let lineHeight = max(dlSize.height, ulSize.height)
-        let topY = height - lineHeight - verticalPadding
-        let bottomY = verticalPadding
+        let combinedHeight = lineHeight * 2 - lineOverlap
+        let bottomY = floor((height - combinedHeight) / 2)
+        let topY = bottomY + lineHeight - lineOverlap
         
         (download as NSString).draw(at: CGPoint(x: horizontalPadding, y: topY), withAttributes: dlAttributes)
         (upload as NSString).draw(at: CGPoint(x: horizontalPadding, y: bottomY), withAttributes: ulAttributes)
         image.unlockFocus()
-        image.isTemplate = false
+        image.isTemplate = true
         
-        return (image: image, width: width)
+        return image
     }
     
     @objc func togglePopover(_ sender: Any?) {

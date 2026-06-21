@@ -13,7 +13,7 @@ class SettingsManager: ObservableObject {
     @AppStorage("processUpdateInterval") var processUpdateInterval: Double = 3.0
     @AppStorage("displayStyle") var displayStyle: DisplayStyle = .both
     @AppStorage("showProcessIcon") var showProcessIcon: Bool = true
-    @AppStorage("processDisplayCount") var processDisplayCount: Int = 10
+    @AppStorage("processDisplayCount") var processDisplayCount: Int = 6
     @AppStorage("launchAtLogin") var launchAtLogin: Bool = false
 }
 
@@ -51,7 +51,7 @@ struct SettingsView: View {
             Section(header: Text("Process List")) {
                 Toggle("Show Process Icons", isOn: $settings.showProcessIcon)
                 
-                Stepper(value: $settings.processDisplayCount, in: 5...10, step: 1) {
+                Stepper(value: $settings.processDisplayCount, in: 3...6, step: 1) {
                     Text("Visible Processes: \(settings.processDisplayCount)")
                 }
             }
@@ -94,7 +94,7 @@ struct SettingsView: View {
         .padding()
         .frame(width: 420, height: 360)
         .onAppear {
-            settings.processDisplayCount = max(5, min(10, settings.processDisplayCount))
+            settings.processDisplayCount = max(3, min(6, settings.processDisplayCount))
             settings.launchAtLogin = LaunchAtLoginManager.isEnabled()
         }
     }

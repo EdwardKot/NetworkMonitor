@@ -6,11 +6,6 @@ class AppMetadataCache {
     private var cache: [Int32: (name: String, icon: NSImage?, lastAccess: Date)] = [:]
     private let lock = NSLock()
     
-    private let defaultIcon: NSImage? = {
-        let image = NSImage(systemSymbolName: "gear", accessibilityDescription: "Process")
-        return image
-    }()
-    
     func getMetadata(for pid: Int32, defaultName: String) -> (name: String, icon: NSImage?) {
         lock.lock()
         defer { lock.unlock() }
@@ -21,7 +16,7 @@ class AppMetadataCache {
         }
         
         var name = defaultName
-        var icon = defaultIcon
+        var icon: NSImage?
         
         if let app = NSRunningApplication(processIdentifier: pid) {
             name = app.localizedName ?? defaultName
